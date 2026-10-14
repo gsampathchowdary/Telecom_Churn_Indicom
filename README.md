@@ -107,24 +107,15 @@ All models were evaluated on an unseen stratified test partition (20% sample, $n
 
 ## 🚀 Quickstart & Setup Guide
 
-### 1. Clone the Repository
+### 1. Configure Virtual Environment
 ```bash
-git clone https://github.com/<your-username>/telecom-customer-churn.git
-cd telecom-customer-churn
-```
-
-### 2. Configure Virtual Environment
-```bash
-# macOS/Linux
-python3 -m venv venv
-source venv/bin/activate
 
 # Windows (Command Prompt / PowerShell)
 python -m venv venv
 venv\Scripts\activate
 ```
 
-### 3. Install Dependencies
+### 2. Install Dependencies
 Create a `requirements.txt` file (or install directly):
 ```text
 pandas>=2.0.0
@@ -140,13 +131,13 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4. Place Dataset
+### 3. Place Dataset
 Place the raw dataset in the `data/` directory:
 ```bash
 Telco-Customer-Churn.csv
 ```
 
-### 5. Execute the End-to-End Pipeline
+### 4. Execute the End-to-End Pipeline
 ```bash
 python main.py
 ```
@@ -173,5 +164,3 @@ Based on bivariate analysis and feature coefficients extracted during model trai
 
 ---
 
-## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
