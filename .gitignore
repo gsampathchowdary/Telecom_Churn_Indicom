@@ -1,0 +1,7 @@
+# telecom_churn_project/.gitignore
+__pycache__/
+*.py[cod]
+*$py.class
+output/
+__pycache__/
+*.pyc
