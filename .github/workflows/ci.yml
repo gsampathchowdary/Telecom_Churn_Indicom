@@ -1,0 +1,43 @@
+name: CI Pipeline - Telecom Churn MLOps
+
+on:
+    push:
+      branches: [ main ]
+    pull_request:
+      branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: telecom-churn-api:latest
+
+      - name: Test Docker Container Run & Health Check
+        run: |
+          docker run -d -p 8000:8000 --name test-churn-container telecom-churn-api:latest
+          # Give the container a few seconds to start up
+          sleep 5
+          # Test the /health endpoint to ensure it returns 200 OK
+          curl --fail http://localhost:8000/health
