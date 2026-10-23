@@ -1,0 +1,22 @@
+artifact_path: file:C:/Users/sampa/Telecom_Churn_Indicom/telecom_churn_project/mlruns/1/models/m-ece81a15aa9244eb943c107c4daa18bf/artifacts
+flavors:
+  python_function:
+    data: model.ubj
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.xgboost
+    python_version: 3.14.3
+  xgboost:
+    code: null
+    data: model.ubj
+    model_class: xgboost.sklearn.XGBClassifier
+    model_format: ubj
+    xgb_version: 3.4.1
+mlflow_version: 3.17.2
+model_id: m-ece81a15aa9244eb943c107c4daa18bf
+model_size_bytes: 442040
+model_uuid: m-ece81a15aa9244eb943c107c4daa18bf
+prompts: null
+run_id: 44df35f1069e4d8d8d6fb659693ff1f4
+utc_time_created: '2026-10-23 10:35:50.844808'

@@ -1,120 +1,93 @@
 import os
-from pathlib import Path
 import joblib
-import matplotlib.pyplot as plt
-import numpy as np
+import optuna
+import shap
+import mlflow
+import mlflow.xgboost
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    accuracy_score,
-    confusion_matrix,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-    roc_curve,
-)
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import DecisionTreeClassifier
+import numpy as np
+import matplotlib.pyplot as plt
+from xgboost import XGBClassifier
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from sklearn.metrics import roc_auc_score, recall_score, precision_score, f1_score
 
-base_dir = Path(__file__).resolve().parent.parent
-output_dir = base_dir / "output" / "models"
-os.makedirs(output_dir, exist_ok=True)
+os.makedirs("output/models", exist_ok=True)
+os.makedirs("output/processed", exist_ok=True)
 
+def train_and_evaluate(processed_path="output/processed/processed_churn.csv"):
+    if not os.path.exists(processed_path):
+        raise FileNotFoundError(f"Processed data not found at {processed_path}. Run preprocessing first.")
+        
+    df = pd.read_csv(processed_path)
+    X = df.drop(columns=["Churn"])
+    y = df["Churn"]
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
-def train_and_evaluate(x_train, x_test, y_train, y_test):
-    models = {
-        "Logistic Regression": LogisticRegression(
-            class_weight="balanced", max_iter=1000, random_state=42
-        ),
-        "Decision Tree": DecisionTreeClassifier(
-            class_weight="balanced", max_depth=5, random_state=42
-        ),
-        "Random Forest": RandomForestClassifier(
-            class_weight="balanced", n_estimators=100, random_state=42
-        ),
-        "K-Nearest Neighbors": KNeighborsClassifier(n_neighbors=5),
-        "Naive Bayes": GaussianNB(),
-    }
+    def objective(trial):
+        params = {
+            "n_estimators": trial.suggest_int("n_estimators", 100, 400),
+            "max_depth": trial.suggest_int("max_depth", 3, 8),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+            "scale_pos_weight": trial.suggest_float("scale_pos_weight", 1.5, 3.5),
+            "random_state": 42,
+            "eval_metric": "logloss"
+        }
+        model = XGBClassifier(**params)
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+        return scores.mean()
 
-    results = []
-    roc_curves = {}
+    print("Running Optuna hyperparameter optimization...")
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=20, show_progress_bar=True)
+    best_params = study.best_params
 
-    for name, model in models.items():
-        model.fit(x_train, y_train)
-        y_pred = model.predict(x_test)
-        y_prob = (
-            model.predict_proba(x_test)[:, 1]
-            if hasattr(model, "predict_proba")
-            else y_pred
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    mlflow.set_experiment("Telecom_Churn_Optuna_SHAP")
+
+    with mlflow.start_run(run_name="XGBoost_Optuna_Best"):
+        mlflow.log_params(best_params)
+
+        model = XGBClassifier(**best_params, random_state=42, eval_metric="logloss")
+        model.fit(X_train, y_train)
+
+        y_probs = model.predict_proba(X_test)[:, 1]
+        y_preds = (y_probs >= 0.45).astype(int)
+
+        metrics = {
+            "roc_auc": roc_auc_score(y_test, y_probs),
+            "recall": recall_score(y_test, y_preds),
+            "precision": precision_score(y_test, y_preds),
+            "f1_score": f1_score(y_test, y_preds)
+        }
+        mlflow.log_metrics(metrics)
+        print(f"Model Evaluation Metrics: {metrics}")
+
+        # Generate SHAP explanations
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer(X_test)
+
+        plt.figure(figsize=(10, 6))
+        shap.summary_plot(shap_values, X_test, show=False)
+        plt.tight_layout()
+        shap_plot_path = "output/models/shap_summary_plot.png"
+        plt.savefig(shap_plot_path, dpi=300)
+        plt.close()
+        mlflow.log_artifact(shap_plot_path)
+
+        # Save model binary locally
+        model_path = "output/models/xgb_churn_model.joblib"
+        joblib.dump(model, model_path)
+        
+        mlflow.xgboost.log_model(
+            xgb_model=model,
+            artifact_path="churn_model",
+            registered_model_name="TelecomChurnXGBoost",
         )
+        print(f"Model trained, evaluated, and saved successfully to {model_path}")
 
-        acc = accuracy_score(y_test, y_pred)
-        prec = precision_score(y_test, y_pred, zero_division=0)
-        rec = recall_score(y_test, y_pred, zero_division=0)
-        f1 = f1_score(y_test, y_pred, zero_division=0)
-        auc = roc_auc_score(y_test, y_prob)
-
-        results.append(
-            {
-                "Model": name,
-                "Accuracy": acc,
-                "Precision": prec,
-                "Recall": rec,
-                "F1-Score": f1,
-                "ROC-AUC": auc,
-            }
-        )
-
-        fpr, tpr, _ = roc_curve(y_test, y_prob)
-        roc_curves[name] = (fpr, tpr, auc)
-
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(output_dir / "evaluation_metrics.csv", index=False)
-
-    plt.figure(figsize=(8, 6))
-    for name, (fpr, tpr, auc) in roc_curves.items():
-        plt.plot(fpr, tpr, label=f"{name} (AUC = {auc:.2f})")
-    plt.plot([0, 1], [0, 1], "k--")
-    plt.xlabel("false positive rate")
-    plt.ylabel("true positive rate")
-    plt.title("roc-auc comparison across models")
-    plt.legend()
-    plt.savefig(output_dir / "roc_auc_curve.png", bbox_inches="tight")
-    plt.close()
-
-    best_model_name = results_df.sort_values(
-        by=["Recall", "ROC-AUC"], ascending=False
-    ).iloc[0]["Model"]
-    best_model = models[best_model_name]
-    joblib.dump(best_model, output_dir / "best_model.joblib")
-
-    y_pred_best = best_model.predict(x_test)
-    cm = confusion_matrix(y_test, y_pred_best)
-
-    plt.figure(figsize=(5, 4))
-    plt.imshow(cm, cmap="Blues", interpolation="nearest")
-    plt.title(f"confusion matrix: {best_model_name}")
-    plt.colorbar()
-    ticks = np.arange(2)
-    plt.xticks(ticks, ["Retained", "Churned"])
-    plt.yticks(ticks, ["Retained", "Churned"])
-    for i in range(2):
-        for j in range(2):
-            plt.text(
-                j,
-                i,
-                format(cm[i, j], "d"),
-                ha="center",
-                va="center",
-                color="red" if cm[i, j] > cm.max() / 2 else "black",
-            )
-    plt.ylabel("actual")
-    plt.xlabel("predicted")
-    plt.tight_layout()
-    plt.savefig(output_dir / "best_model_confusion_matrix.png")
-    plt.close()
-
-    return results_df, best_model_name
+if __name__ == "__main__":
+    train_and_evaluate()
